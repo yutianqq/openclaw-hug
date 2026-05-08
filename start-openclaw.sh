@@ -49,7 +49,7 @@ cat > /root/.openclaw/openclaw.json <<EOF
 EOF
 
 # 5. 启动定时备份 (每 1 小时)
-(while true; do sleep 3600; python3 /app/sync.py backup; done) &
+(while true; do sleep 5; python3 /app/sync.py backup; done) &
 
 # 6. 运行
 openclaw doctor --fix
