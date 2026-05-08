@@ -58,9 +58,9 @@ cat > /root/.openclaw/openclaw.json <<EOF
 EOF
 
 # 5. 安装 QQ Bot 插件（首次运行或版本更新时自动安装）
-if ! openclaw plugins list 2>/dev/null | grep -q "@openclaw/qqbot"; then
+if ! openclaw plugins list 2>/dev/null | grep -q "@openclaw-china/qqbot"; then
   echo "Installing QQ Bot plugin..."
-  openclaw plugins install @openclaw/qqbot
+  openclaw plugins install @openclaw-china/qqbot
 fi
 
 # 6. 启动定时备份 (每 1 小时)
