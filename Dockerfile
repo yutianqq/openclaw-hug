@@ -12,16 +12,13 @@ RUN npm install -g openclaw@latest --unsafe-perm
 # RUN npm install -g @larksuiteoapi/node-sdk --unsafe-perm && \
     # npm install -g openclaw@2026.2.26 --unsafe-perm
 
-# 3. 安装 QQ Bot 通道插件
-RUN openclaw plugins install @openclaw/qqbot
-
-# 4. 设置工作目录并拷贝脚本
+# 3. 设置工作目录并拷贝脚本
 WORKDIR /app
 COPY sync.py .
 COPY start-openclaw.sh .
 RUN chmod +x start-openclaw.sh
 
-# 5. 环境变量
+# 4. 环境变量
 ENV PORT=7860 HOME=/root
 
 EXPOSE 7860
