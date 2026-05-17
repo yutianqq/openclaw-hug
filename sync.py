@@ -37,7 +37,8 @@ def backup():
             paths_to_backup = [
                 "/root/.openclaw/sessions",
                 "/root/.openclaw/agents/main/sessions",
-                "/root/.openclaw/openclaw.json"
+                "/root/.openclaw/credentials",
+                "/root/.openclaw/openclaw.json",
             ]
             for p in paths_to_backup:
                 if os.path.exists(p):
