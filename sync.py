@@ -19,8 +19,12 @@ def restore():
         path = hf_hub_download(repo_id=repo_id, filename=FILENAME, repo_type="dataset", token=token)
         
         with tarfile.open(path, "r:gz") as tar:
-            tar.extractall(path="/root/.openclaw/")
-        print(f"Success: Restored from {FILENAME}")
+            for member in tar.getmembers():
+                # 跳过 openclaw.json，由 start-openclaw.sh 按当前 Secrets 重新生成
+                if member.name == "openclaw.json" or member.name.endswith("/openclaw.json"):
+                    continue
+                tar.extract(member, path="/root/.openclaw/")
+        print(f"Success: Restored from {FILENAME} (sessions/credentials only)")
         return True
     except Exception as e:
         # 如果是第一次运行，仓库里没文件，报错是正常的
