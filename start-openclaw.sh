@@ -233,4 +233,4 @@ openclaw plugins list 2>/dev/null | grep -i qq || echo "WARN: qqbot not in plugi
 
 openclaw doctor --fix --non-interactive || true
 
-exec openclaw gateway run --port "$PORT" --bind 0.0.0.0
+exec openclaw gateway run --port "$PORT" --bind lan
