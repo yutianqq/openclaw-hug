@@ -1,0 +1,25 @@
+# 定时访问 HF Space，减轻免费版休眠（无法保证 24/7，但能明显缩短离线时间）
+# 在 GitHub 仓库 Settings → Secrets → Actions 添加：HF_SPACE_URL
+# 例如：https://你的用户名-空间名.hf.space
+
+name: HF Space keepalive
+
+on:
+  schedule:
+    # 每 5 分钟一次（GitHub 免费 Actions 可能有数分钟延迟）
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Space
+        run: |
+          if [ -z "${{ secrets.HF_SPACE_URL }}" ]; then
+            echo "Skip: set repository secret HF_SPACE_URL (your Space app URL)"
+            exit 0
+          fi
+          curl -fsS -m 60 -o /dev/null -w "HTTP %{http_code}\n" "${{ secrets.HF_SPACE_URL }}" \
+            || curl -fsS -m 60 -o /dev/null -w "HTTP %{http_code} (retry)\n" "${{ secrets.HF_SPACE_URL }}/" \
+            || echo "Ping failed (Space may be building or sleeping)"
