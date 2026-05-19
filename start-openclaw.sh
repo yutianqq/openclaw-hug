@@ -15,11 +15,18 @@ fi
 # 2. 恢复会话备份（不依赖备份里的 openclaw.json，下面会重新生成）
 python3 /app/sync.py restore
 
-# 3. 环境变量
-CLEAN_BASE=$(echo "${OPENAI_API_BASE:-https://integrate.api.nvidia.com/v1}" | sed 's|/chat/completions||g' | sed 's|/v1/|/v1|g' | sed 's|/v1$|/v1|g')
+# 3. 环境变量（均在 HF Space Settings 中配置）
+#    Variable PROVIDERS: 逗号分隔的 provider 名称，如 nvidia,openrouter
+#    每个 provider 需配置（NAME 为大写 slug）:
+#      {NAME}_OPENAI_API_BASE  (Variable)
+#      {NAME}_MODELS           (Variable，逗号分隔模型 ID)
+#      {NAME}_API_KEY          (Secret)
+#    全局:
+#      MODEL, MODEL_FALLBACKS  (Variable)
+#    单 provider 兼容（PROVIDERS 留空时）:
+#      OPENAI_API_BASE, MODELS, OPENAI_API_KEY, PROVIDER_NAME
+PROVIDERS="${PROVIDERS:-}"
 MODEL="${MODEL:-}"
-NVIDIA_MODELS="${NVIDIA_MODELS:-}"
-OPENROUTER_MODELS="${OPENROUTER_MODELS:-}"
 MODEL_FALLBACKS="${MODEL_FALLBACKS:-}"
 PORT="${PORT:-7860}"
 
@@ -32,83 +39,116 @@ else
   echo "QQ Official Bot: SKIPPED — set Secrets: QQBOT_APP_ID + QQBOT_CLIENT_SECRET"
 fi
 
-if echo "$MODEL" | grep -qiE '480b|405b|340b|70b|49b'; then
-  echo "WARN: MODEL=$MODEL may timeout on HF Space; prefer smaller free models in NVIDIA_MODELS / OPENROUTER_MODELS"
-fi
-
-# 4. 用 Python 写配置（避免 Secret 含引号时破坏 JSON）
+# 4. 用 Python 写配置（从环境变量读取多 provider，避免 Secret 经 argv 传递）
 QQ_BOT_ENABLED_PY="False"
 [ "$QQ_BOT_ENABLED" = "true" ] && QQ_BOT_ENABLED_PY="True"
 
-OPENCLAW_GATEWAY_PASSWORD="${OPENCLAW_GATEWAY_PASSWORD:-}"
-OPENAI_API_KEY="${OPENAI_API_KEY:-}"
-OPENROUTER_API_KEY="${OPENROUTER_API_KEY:-}"
+export QQ_BOT_ENABLED_PY QQ_APP_ID QQ_CLIENT_SECRET PORT
+export PROVIDERS MODEL MODEL_FALLBACKS OPENCLAW_GATEWAY_PASSWORD
 
-python3 - "$QQ_BOT_ENABLED_PY" "$QQ_APP_ID" "$QQ_CLIENT_SECRET" "$CLEAN_BASE" "$MODEL" "$PORT" "$OPENCLAW_GATEWAY_PASSWORD" "$OPENAI_API_KEY" "$OPENROUTER_API_KEY" "$NVIDIA_MODELS" "$OPENROUTER_MODELS" "$MODEL_FALLBACKS" <<'PY'
-import json, sys
-
-enabled = sys.argv[1] == "True"
-app_id, secret = sys.argv[2], sys.argv[3]
-base, model, port = sys.argv[4], sys.argv[5], sys.argv[6]
-gw_token, nvidia_key, openrouter_key = sys.argv[7], sys.argv[8], sys.argv[9]
-nvidia_models_raw, openrouter_models_raw, fallbacks_raw = sys.argv[10], sys.argv[11], sys.argv[12]
+python3 <<'PY'
+import json, os, re
 
 def parse_list(s):
-    return [x.strip() for x in s.split(",") if x.strip()]
+    return [x.strip() for x in (s or "").split(",") if x.strip()]
 
-nvidia_ids = parse_list(nvidia_models_raw)
-openrouter_ids = parse_list(openrouter_models_raw)
+def clean_base(url):
+    if not url:
+        return ""
+    u = url.strip()
+    u = re.sub(r"/chat/completions/?$", "", u)
+    u = re.sub(r"/v1/?$", "/v1", u)
+    return u
+
+def provider_slugs():
+    raw = os.environ.get("PROVIDERS", "").strip()
+    if raw:
+        return [s.strip().lower() for s in raw.split(",") if s.strip()]
+    # 单 provider 向后兼容
+    if os.environ.get("OPENAI_API_BASE") or os.environ.get("MODELS") or os.environ.get("OPENAI_API_KEY"):
+        return [os.environ.get("PROVIDER_NAME", "default").strip().lower() or "default"]
+    return []
+
+def load_provider(slug):
+    key = slug.upper()
+    base = clean_base(os.environ.get(f"{key}_OPENAI_API_BASE", ""))
+    models = parse_list(os.environ.get(f"{key}_MODELS", ""))
+    api_key = os.environ.get(f"{key}_API_KEY", "")
+    if slug == os.environ.get("PROVIDER_NAME", "default").strip().lower():
+        base = base or clean_base(os.environ.get("OPENAI_API_BASE", ""))
+        models = models or parse_list(os.environ.get("MODELS", ""))
+        api_key = api_key or os.environ.get("OPENAI_API_KEY", "")
+    return base, models, api_key
+
+enabled = os.environ.get("QQ_BOT_ENABLED_PY") == "True"
+app_id = os.environ.get("QQ_APP_ID", "")
+secret = os.environ.get("QQ_CLIENT_SECRET", "")
+model = os.environ.get("MODEL", "").strip()
+fallbacks_raw = os.environ.get("MODEL_FALLBACKS", "")
+port = int(os.environ.get("PORT", "7860"))
+gw_token = os.environ.get("OPENCLAW_GATEWAY_PASSWORD", "")
+
+# model_id -> [slug, ...]（用于解析未带前缀的 MODEL）
+id_to_slugs = {}
+providers = {}
+agent_models = {}
+
+for slug in provider_slugs():
+    base, model_ids, api_key = load_provider(slug)
+    if not api_key:
+        print(f"WARN: {slug.upper()}_API_KEY (Secret) not set — skip provider '{slug}'")
+        continue
+    if not base:
+        print(f"WARN: {slug.upper()}_OPENAI_API_BASE (Variable) not set — skip provider '{slug}'")
+        continue
+    if not model_ids:
+        print(f"WARN: {slug.upper()}_MODELS (Variable) not set — skip provider '{slug}'")
+        continue
+
+    providers[slug] = {
+        "baseUrl": base,
+        "apiKey": api_key,
+        "api": "openai-completions",
+        "models": [{"id": mid, "name": mid, "contextWindow": 128000} for mid in model_ids],
+    }
+    for mid in model_ids:
+        ref = f"{slug}/{mid}"
+        agent_models[ref] = {"alias": mid}
+        id_to_slugs.setdefault(mid, []).append(slug)
+
+def resolve_ref(item):
+    item = item.strip()
+    if not item:
+        return item
+    if "/" in item:
+        return item
+    slugs = id_to_slugs.get(item, [])
+    if len(slugs) == 1:
+        return f"{slugs[0]}/{item}"
+    if len(slugs) > 1:
+        print(f"WARN: model id '{item}' exists on multiple providers {slugs}; use provider/model_id")
+    return item
 
 def resolve_primary():
     if model:
-        if model.startswith(("nvidia/", "openrouter/")):
-            return model
-        if model in nvidia_ids:
-            return f"nvidia/{model}"
-        if model in openrouter_ids:
-            return f"openrouter/{model}"
-        return model
-    if nvidia_ids:
-        return f"nvidia/{nvidia_ids[0]}"
-    if openrouter_ids:
-        return f"openrouter/{openrouter_ids[0]}"
+        return resolve_ref(model)
+    for slug in provider_slugs():
+        if slug in providers:
+            mids = providers[slug]["models"]
+            if mids:
+                return f"{slug}/{mids[0]['id']}"
     return None
 
 def resolve_fallbacks(primary):
     out = []
     for item in parse_list(fallbacks_raw):
-        if item.startswith(("nvidia/", "openrouter/")):
-            ref = item
-        elif item in nvidia_ids:
-            ref = f"nvidia/{item}"
-        elif item in openrouter_ids:
-            ref = f"openrouter/{item}"
-        else:
-            ref = item
-        if ref != primary and ref not in out:
+        ref = resolve_ref(item)
+        if ref and ref != primary and ref not in out:
             out.append(ref)
     return out
 
-providers = {}
-env = {}
-agent_models = {}
 primary = resolve_primary()
 fallbacks = resolve_fallbacks(primary) if primary else []
-
-if nvidia_key and nvidia_ids:
-    providers["nvidia"] = {
-        "baseUrl": base,
-        "apiKey": nvidia_key,
-        "api": "openai-completions",
-        "models": [{"id": mid, "name": mid, "contextWindow": 128000} for mid in nvidia_ids],
-    }
-    for mid in nvidia_ids:
-        agent_models[f"nvidia/{mid}"] = {"alias": mid}
-
-if openrouter_key:
-    env["OPENROUTER_API_KEY"] = openrouter_key
-    for mid in openrouter_ids:
-        agent_models[f"openrouter/{mid}"] = {"alias": mid}
 
 agents_defaults = {}
 if agent_models:
@@ -127,7 +167,7 @@ cfg = {
     "gateway": {
         "mode": "local",
         "bind": "lan",
-        "port": int(port),
+        "port": port,
         "trustedProxies": ["0.0.0.0/0"],
         "auth": {"mode": "token", "token": gw_token},
         "controlUi": {
@@ -151,24 +191,21 @@ cfg = {
     },
 }
 
-if env:
-    cfg["env"] = env
-
 path = "/root/.openclaw/openclaw.json"
 with open(path, "w", encoding="utf-8") as f:
     json.dump(cfg, f, indent=2, ensure_ascii=False)
-providers_on = ",".join(providers.keys()) or "none"
-or_env = "yes" if openrouter_key else "no"
+
+total_models = sum(len(p["models"]) for p in providers.values())
 print(
     f"Wrote {path} (qqbot={enabled}, primary={primary or 'unset'}, "
-    f"providers={providers_on}, openrouter_key={or_env}, "
-    f"nvidia_models={len(nvidia_ids)}, openrouter_models={len(openrouter_ids)})"
+    f"providers={','.join(providers.keys()) or 'none'}, models={total_models})"
 )
+if not providers:
+    print("WARN: no provider configured — set PROVIDERS and per-provider Variables/Secrets")
 PY
 
 if [ "$QQ_BOT_ENABLED" = "true" ]; then
   echo "QQ Official Bot: enabled appId=${QQ_APP_ID}"
-  # 登记渠道账号（失败不阻断启动）
   openclaw channels add --channel qqbot --token "${QQ_APP_ID}:${QQ_CLIENT_SECRET}" 2>/dev/null \
     && echo "QQ channel account registered" \
     || echo "QQ channel add skipped (may already exist)"
@@ -177,16 +214,23 @@ fi
 echo "=== Startup check ==="
 if [ -n "$QQ_APP_ID" ]; then echo "QQBOT_APP_ID set: yes"; else echo "QQBOT_APP_ID set: NO"; fi
 if [ -n "$QQ_CLIENT_SECRET" ]; then echo "QQBOT_CLIENT_SECRET set: yes"; else echo "QQBOT_CLIENT_SECRET set: NO"; fi
-if [ -n "$OPENAI_API_KEY" ]; then echo "OPENAI_API_KEY (NVIDIA): yes"; else echo "OPENAI_API_KEY (NVIDIA): NO"; fi
-if [ -n "$OPENROUTER_API_KEY" ]; then echo "OPENROUTER_API_KEY: yes"; else echo "OPENROUTER_API_KEY: NO"; fi
-echo "NVIDIA_MODELS=${NVIDIA_MODELS:-<empty>}"
-echo "OPENROUTER_MODELS=${OPENROUTER_MODELS:-<empty>}"
+echo "PROVIDERS=${PROVIDERS:-<unset, single-provider compat via OPENAI_* >}"
 echo "MODEL=${MODEL:-<unset>} MODEL_FALLBACKS=${MODEL_FALLBACKS:-<empty>}"
+for slug in $(echo "${PROVIDERS:-default}" | tr ',' ' '); do
+  key=$(echo "$slug" | tr '[:lower:]' '[:upper:]')
+  eval "base=\${${key}_OPENAI_API_BASE:-}"
+  eval "models=\${${key}_MODELS:-}"
+  eval "has_key=\${${key}_API_KEY:+yes}"
+  has_key=${has_key:-no}
+  if [ "$slug" = "default" ] && [ -z "$base" ]; then base="${OPENAI_API_BASE:-}"; fi
+  if [ "$slug" = "default" ] && [ -z "$models" ]; then models="${MODELS:-}"; fi
+  if [ "$slug" = "default" ] && [ "$has_key" = "no" ] && [ -n "${OPENAI_API_KEY:-}" ]; then has_key=yes; fi
+  echo "  [$slug] base=${base:-<unset>} models=${models:-<empty>} api_key=${has_key}"
+done
 openclaw plugins list 2>/dev/null | grep -i qq || echo "WARN: qqbot not in plugin list"
 
 (while true; do sleep 7200; python3 /app/sync.py backup; done) &
 
-# 不用 doctor --fix，避免覆盖 plugins/channels 配置
 openclaw doctor 2>/dev/null || true
 
 exec openclaw gateway run --port "$PORT"
