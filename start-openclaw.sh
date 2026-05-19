@@ -30,7 +30,7 @@ else
 fi
 
 if echo "$MODEL" | grep -qiE '480b|405b|340b|70b|49b'; then
-  echo "WARN: MODEL=$MODEL may timeout on HF Space. Use stepfun-ai/step-3-5-flash or huggingface/*:fastest"
+  echo "WARN: MODEL=$MODEL may timeout on HF Space. Default: stepfun-ai/step-3-5-flash"
 fi
 
 # 4. 用 Python 写配置（避免 Secret 含引号时破坏 JSON）
@@ -39,66 +39,85 @@ QQ_BOT_ENABLED_PY="False"
 
 OPENCLAW_GATEWAY_PASSWORD="${OPENCLAW_GATEWAY_PASSWORD:-}"
 OPENAI_API_KEY="${OPENAI_API_KEY:-}"
-HF_TOKEN="${HF_TOKEN:-${HUGGINGFACE_HUB_TOKEN:-}}"
+OPENROUTER_API_KEY="${OPENROUTER_API_KEY:-}"
+# 在 Space Secrets 中自行添加免费模型 id，逗号分隔（不含 provider 前缀）
+NVIDIA_MODELS="${NVIDIA_MODELS:-}"
+OPENROUTER_MODELS="${OPENROUTER_MODELS:-}"
+MODEL_FALLBACKS="${MODEL_FALLBACKS:-}"
 
-python3 - "$QQ_BOT_ENABLED_PY" "$QQ_APP_ID" "$QQ_CLIENT_SECRET" "$CLEAN_BASE" "$MODEL" "$PORT" "$OPENCLAW_GATEWAY_PASSWORD" "$OPENAI_API_KEY" "$HF_TOKEN" <<'PY'
+python3 - "$QQ_BOT_ENABLED_PY" "$QQ_APP_ID" "$QQ_CLIENT_SECRET" "$CLEAN_BASE" "$MODEL" "$PORT" "$OPENCLAW_GATEWAY_PASSWORD" "$OPENAI_API_KEY" "$OPENROUTER_API_KEY" "$NVIDIA_MODELS" "$OPENROUTER_MODELS" "$MODEL_FALLBACKS" <<'PY'
 import json, sys
 
 enabled = sys.argv[1] == "True"
 app_id, secret = sys.argv[2], sys.argv[3]
 base, model, port = sys.argv[4], sys.argv[5], sys.argv[6]
-gw_token, nvidia_key, hf_key = sys.argv[7], sys.argv[8], sys.argv[9]
+gw_token, nvidia_key, openrouter_key = sys.argv[7], sys.argv[8], sys.argv[9]
+nvidia_models_csv, openrouter_models_csv, fallbacks_csv = sys.argv[10], sys.argv[11], sys.argv[12]
 
-NVIDIA_MODEL = ("stepfun-ai/step-3-5-flash", "Step 3.5 Flash", 128000)
-HF_BASE = "https://router.huggingface.co/v1"
-# HF Inference Providers — :fastest 自动选吞吐最高的后端（Groq 等）
-HF_FAST = [
-    ("Qwen/Qwen2.5-0.5B-Instruct:fastest", "Qwen2.5 0.5B", 32768),
-    ("google/gemma-2-2b-it:fastest", "Gemma 2 2B", 8192),
-    ("meta-llama/Llama-3.2-1B-Instruct:fastest", "Llama 3.2 1B", 131072),
-]
+DEFAULT_NVIDIA_ID = "stepfun-ai/step-3-5-flash"
+OPENROUTER_BASE = "https://openrouter.ai/api/v1"
+
+def parse_csv(csv):
+    return [m.strip() for m in (csv or "").split(",") if m.strip()]
 
 def resolve_primary():
-    if model.startswith(("nvidia/", "huggingface/")):
+    if model.startswith(("nvidia/", "openrouter/")):
         return model
-    if model.startswith("stepfun-ai/"):
+    if model:
         return f"nvidia/{model}"
-    return f"nvidia/{NVIDIA_MODEL[0]}"
+    return f"nvidia/{DEFAULT_NVIDIA_ID}"
+
+def nvidia_model_entries():
+    ids = parse_csv(nvidia_models_csv)
+    if DEFAULT_NVIDIA_ID not in ids:
+        ids.insert(0, DEFAULT_NVIDIA_ID)
+    seen, out = set(), []
+    for mid in ids:
+        if mid in seen:
+            continue
+        seen.add(mid)
+        name = "Step 3.5 Flash" if mid == DEFAULT_NVIDIA_ID else mid
+        out.append({"id": mid, "name": name, "contextWindow": 128000})
+    return out
 
 providers = {}
 env = {}
 agent_models = {}
 primary = resolve_primary()
-fallbacks = []
+fallbacks = parse_csv(fallbacks_csv)
 
 if nvidia_key:
-    mid, name, ctx = NVIDIA_MODEL
+    entries = nvidia_model_entries()
     providers["nvidia"] = {
         "baseUrl": base,
         "apiKey": nvidia_key,
         "api": "openai-completions",
-        "models": [{"id": mid, "name": name, "contextWindow": ctx}],
+        "models": entries,
     }
-    agent_models[f"nvidia/{mid}"] = {"alias": name}
+    for e in entries:
+        agent_models[f"nvidia/{e['id']}"] = {"alias": e["name"]}
 
-if hf_key:
-    providers["huggingface"] = {
-        "baseUrl": HF_BASE,
-        "apiKey": hf_key,
-        "api": "openai-completions",
-        "models": [
-            {"id": mid, "name": name, "contextWindow": ctx}
-            for mid, name, ctx in HF_FAST
-        ],
-    }
-    env["HF_TOKEN"] = hf_key
-    for mid, name, _ in HF_FAST:
-        agent_models[f"huggingface/{mid}"] = {"alias": f"HF {name}"}
-        ref = f"huggingface/{mid}"
+if openrouter_key:
+    env["OPENROUTER_API_KEY"] = openrouter_key
+    or_ids = parse_csv(openrouter_models_csv)
+    if or_ids:
+        providers["openrouter"] = {
+            "baseUrl": OPENROUTER_BASE,
+            "apiKey": openrouter_key,
+            "api": "openai-completions",
+            "models": [
+                {"id": mid, "name": mid, "contextWindow": 128000} for mid in or_ids
+            ],
+        }
+        for mid in or_ids:
+            agent_models[f"openrouter/{mid}"] = {"alias": mid}
+
+if not fallbacks:
+    for ref in list(agent_models.keys()):
         if ref != primary:
             fallbacks.append(ref)
 
-fallbacks = [f for f in fallbacks if f != primary][:3]
+fallbacks = [f for f in fallbacks if f != primary][:8]
 
 cfg = {
     "models": {"mode": "merge", "providers": providers},
@@ -162,9 +181,11 @@ echo "=== Startup check ==="
 if [ -n "$QQ_APP_ID" ]; then echo "QQBOT_APP_ID set: yes"; else echo "QQBOT_APP_ID set: NO"; fi
 if [ -n "$QQ_CLIENT_SECRET" ]; then echo "QQBOT_CLIENT_SECRET set: yes"; else echo "QQBOT_CLIENT_SECRET set: NO"; fi
 if [ -n "$OPENAI_API_KEY" ]; then echo "OPENAI_API_KEY (NVIDIA): yes"; else echo "OPENAI_API_KEY (NVIDIA): NO"; fi
-if [ -n "$HF_TOKEN" ]; then echo "HF_TOKEN (Inference): yes"; else echo "HF_TOKEN: NO — Space 通常自动注入，或设置 HUGGINGFACE_HUB_TOKEN"; fi
+if [ -n "$OPENROUTER_API_KEY" ]; then echo "OPENROUTER_API_KEY: yes"; else echo "OPENROUTER_API_KEY: NO"; fi
+echo "NVIDIA_MODELS=${NVIDIA_MODELS:-<empty, only default>}"
+echo "OPENROUTER_MODELS=${OPENROUTER_MODELS:-<empty>}"
 openclaw plugins list 2>/dev/null | grep -i qq || echo "WARN: qqbot not in plugin list"
-echo "MODEL=${MODEL} (default: nvidia/stepfun-ai/step-3-5-flash)"
+echo "MODEL=${MODEL} (default primary: nvidia/stepfun-ai/step-3-5-flash)"
 
 (while true; do sleep 7200; python3 /app/sync.py backup; done) &
 
