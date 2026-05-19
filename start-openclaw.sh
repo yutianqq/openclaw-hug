@@ -231,6 +231,6 @@ openclaw plugins list 2>/dev/null | grep -i qq || echo "WARN: qqbot not in plugi
 
 (while true; do sleep 7200; python3 /app/sync.py backup; done) &
 
-openclaw doctor 2>/dev/null || true
+openclaw doctor --fix --non-interactive || true
 
-exec openclaw gateway run --port "$PORT"
+exec openclaw gateway run --port "$PORT" --bind 0.0.0.0
