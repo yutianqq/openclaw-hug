@@ -193,6 +193,7 @@ cfg = {
 
 path = "/root/.openclaw/openclaw.json"
 with open(path, "w", encoding="utf-8") as f:
+    cfg.setdefault("session", {})["dmScope"] = "per-channel-peer"
     json.dump(cfg, f, indent=2, ensure_ascii=False)
 
 total_models = sum(len(p["models"]) for p in providers.values())
@@ -216,6 +217,7 @@ if [ -n "$QQ_APP_ID" ]; then echo "QQBOT_APP_ID set: yes"; else echo "QQBOT_APP_
 if [ -n "$QQ_CLIENT_SECRET" ]; then echo "QQBOT_CLIENT_SECRET set: yes"; else echo "QQBOT_CLIENT_SECRET set: NO"; fi
 echo "PROVIDERS=${PROVIDERS:-<unset, single-provider compat via OPENAI_* >}"
 echo "MODEL=${MODEL:-<unset>} MODEL_FALLBACKS=${MODEL_FALLBACKS:-<empty>}"
+echo "Session DM scope: $(openclaw config get session.dmScope 2>/dev/null || echo 'unknown')"
 for slug in $(echo "${PROVIDERS:-default}" | tr ',' ' '); do
   key=$(echo "$slug" | tr '[:lower:]' '[:upper:]')
   eval "base=\${${key}_OPENAI_API_BASE:-}"
