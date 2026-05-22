@@ -229,7 +229,7 @@ for slug in $(echo "${PROVIDERS:-default}" | tr ',' ' '); do
 done
 openclaw plugins list 2>/dev/null | grep -i qq || echo "WARN: qqbot not in plugin list"
 
-(while true; do sleep 7200; python3 /app/sync.py backup; done) &
+(while true; do sleep 14400; python3 /app/sync.py backup; done) &
 
 openclaw doctor --fix --non-interactive || true
 
