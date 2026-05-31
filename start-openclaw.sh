@@ -109,11 +109,11 @@ for slug in provider_slugs():
         "baseUrl": base,
         "apiKey": api_key,
         "api": "openai-completions",
-        "models": [{"id": mid, "name": mid, "contextWindow": 128000, "enabled": True} for mid in model_ids],
+        "models": [{"id": mid, "name": mid, "contextWindow": 128000} for mid in model_ids],
     }
     for mid in model_ids:
         ref = f"{slug}/{mid}"
-        agent_models[ref] = {"alias": mid, "enabled": True}
+        agent_models[ref] = {"alias": mid}
         id_to_slugs.setdefault(mid, []).append(slug)
 
 def resolve_ref(item):
@@ -154,7 +154,7 @@ agents_defaults = {}
 if agent_models:
     agents_defaults["models"] = agent_models
 if primary:
-    agents_defaults["model"] = {"primary": primary, "fallbacks": fallbacks, "thinking": True, "fast": True}
+    agents_defaults["model"] = {"primary": primary, "fallbacks": fallbacks}
 
 cfg = {
     "update": {"checkOnStart": True, "auto": {"enabled": True}},
@@ -217,6 +217,9 @@ print(
 if not providers:
     print("WARN: no provider configured — set PROVIDERS and per-provider Variables/Secrets")
 PY
+
+openclaw config set model.thinking true 2>/dev/null || true
+openclaw config set fastMode.enabled true 2>/dev/null || true
 
 if [ "$QQ_BOT_ENABLED" = "true" ]; then
   echo "QQ Official Bot: enabled appId=${QQ_APP_ID}"
