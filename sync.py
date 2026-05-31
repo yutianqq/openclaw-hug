@@ -21,15 +21,9 @@ def restore():
         with tarfile.open(path, "r:gz") as tar:
             for member in tar.getmembers():
                 if member.name == "openclaw.json" or member.name.endswith("/openclaw.json"):
-                    import shutil
-                    tar.extract(member, path="/root/.openclaw/")
-                    src = os.path.join("/root/.openclaw", member.name)
-                    dst = "/root/.openclaw/openclaw.json.backup"
-                    shutil.copy2(src, dst)
-                    os.remove(src)
                     continue
                 tar.extract(member, path="/root/.openclaw/")
-        print(f"Success: Restored from {FILENAME} (sessions/credentials only)")
+        print(f"Success: Restored from {FILENAME} (sessions/credentials/cron only)")
         return True
     except Exception as e:
         # 如果是第一次运行，仓库里没文件，报错是正常的
@@ -42,12 +36,11 @@ def backup():
             return
 
         with tarfile.open(FILENAME, "w:gz") as tar:
-            # 备份关键数据
             paths_to_backup = [
                 "/root/.openclaw/sessions",
                 "/root/.openclaw/agents/main/sessions",
                 "/root/.openclaw/credentials",
-                "/root/.openclaw/openclaw.json",
+                "/root/.openclaw/cron",
             ]
             for p in paths_to_backup:
                 if os.path.exists(p):

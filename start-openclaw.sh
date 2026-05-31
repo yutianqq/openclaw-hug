@@ -12,32 +12,6 @@ if ! openclaw plugins list 2>/dev/null | grep -qE '@openclaw/qqbot|"qqbot"'; the
   openclaw plugins install --dangerously-force-unsafe-install @openclaw/qqbot
 fi
 
-# 1.4 安装 SiliconFlow 图片生成 Plugin（原生 image_generate 支持）
-SF_PLUGIN_DIR="/root/.openclaw/plugins/openclaw-siliconflow-image"
-if [ -d "/app/plugins/openclaw-siliconflow-image" ] && [ ! -d "$SF_PLUGIN_DIR" ]; then
-  echo "Installing siliconflow-image plugin..."
-  mkdir -p "$(dirname "$SF_PLUGIN_DIR")"
-  cp -r "/app/plugins/openclaw-siliconflow-image" "$SF_PLUGIN_DIR"
-fi
-if command -v openclaw &>/dev/null && [ -d "$SF_PLUGIN_DIR" ]; then
-  if ! openclaw plugins list 2>/dev/null | grep -qi "siliconflow-image"; then
-    openclaw plugins install --dangerously-force-unsafe-install "$SF_PLUGIN_DIR" 2>/dev/null || \
-    echo "WARN: siliconflow-image plugin install from dir failed"
-  fi
-  echo "siliconflow-image plugin: installed at $SF_PLUGIN_DIR"
-else
-  echo "WARN: siliconflow-image plugin not found (expected at /app/plugins/openclaw-siliconflow-image or $SF_PLUGIN_DIR)"
-fi
-
-# 1.5 安装图片生成 Skill（SiliconFlow Kolors / FLUX / Qwen-Image）— 兜底
-echo "=== Installing gen-image skill (fallback) ==="
-npx -y clawhub@latest install gen-image 2>/dev/null || \
-openclaw skills install --dangerously-force-unsafe-install duyiliu/gen-image 2>/dev/null || \
-echo "WARN: gen-image skill install failed, trying alternative..."
-if command -v openclaw &>/dev/null; then
-  openclaw skills list 2>/dev/null | head -20 || true
-fi
-
 # 2. 恢复会话备份（不依赖备份里的 openclaw.json，下面会重新生成）
 python3 /app/sync.py restore
 
@@ -113,8 +87,6 @@ model = os.environ.get("MODEL", "").strip()
 fallbacks_raw = os.environ.get("MODEL_FALLBACKS", "")
 port = int(os.environ.get("PORT", "7860"))
 gw_token = os.environ.get("OPENCLAW_GATEWAY_PASSWORD", "")
-sf_api_key = os.environ.get("SILICONFLOW_API_KEY", "")
-sf_base = clean_base(os.environ.get("SILICONFLOW_OPENAI_API_BASE", "https://api.siliconflow.cn/v1"))
 
 # model_id -> [slug, ...]（用于解析未带前缀的 MODEL）
 id_to_slugs = {}
@@ -184,40 +156,14 @@ if agent_models:
 if primary:
     agents_defaults["model"] = {"primary": primary, "fallbacks": fallbacks}
 
-if sf_api_key and "siliconflow" not in providers:
-    providers["siliconflow"] = {
-        "baseUrl": sf_base,
-        "apiKey": sf_api_key,
-        "api": "openai-completions",
-        "models": [
-            {"id": "Kwai-Kolors/Kolors", "name": "Kolors", "contextWindow": 8192},
-        ],
-    }
-    print(f"Added siliconflow provider for image generation (base={sf_base})")
-    agents_defaults["imageGenerationModel"] = {
-        "primary": "siliconflow/Kwai-Kolors/Kolors",
-        "timeoutMs": 180000,
-    }
-
 cfg = {
     "models": {"mode": "merge", "providers": providers},
     "agents": {"defaults": agents_defaults},
     "commands": {"restart": True},
     "plugins": {
-        "allow": ["qqbot"] + (["openclaw-siliconflow-image"] if sf_api_key else []),
-        "entries": {
-            "qqbot": {"enabled": enabled},
-            **({"openclaw-siliconflow-image": {"enabled": bool(sf_api_key)}} if sf_api_key else {}),
-        },
+        "allow": (["qqbot"] if enabled else []),
+        "entries": {"qqbot": {"enabled": enabled}},
     },
-    "skills": {
-        "entries": {
-            "gen-image": {
-                "enabled": bool(sf_api_key),
-                "env": {"SILICONFLOW_API_KEY": sf_api_key} if sf_api_key else {}
-            }
-        }
-    } if sf_api_key else {},
     "gateway": {
         "mode": "local",
         "bind": "lan",
@@ -243,34 +189,23 @@ cfg = {
             "c2cMarkdownDeliveryMode": "proactive-all",
         }
     },
-    "update": {
-        "channel": "stable",
-        "auto": {
-            "enabled": True,
-            "stableDelayHours": 6,
-            "stableJitterHours": 12,
-        },
-    },
 }
 
-MANAGED_KEYS = {"models", "agents", "plugins", "gateway", "channels", "update", "skills"}
-
 path = "/root/.openclaw/openclaw.json"
-backup_path = "/root/.openclaw/openclaw.json.backup"
-old_cfg = {}
-if os.path.exists(backup_path):
-    try:
-        with open(backup_path, "r", encoding="utf-8") as f:
-            old_cfg = json.load(f)
-        for k, v in old_cfg.items():
-            if k not in MANAGED_KEYS and k != "session":
-                cfg[k] = v
-        print(f"Merged {len([k for k in old_cfg if k not in MANAGED_KEYS and k != 'session'])} user key(s) from backup")
-    except Exception as e:
-        print(f"WARN: failed to merge backup config: {e}")
 
-cfg.setdefault("session", {})["dmScope"] = "per-channel-peer"
+old_cfg = None
+try:
+    with open(path, "r", encoding="utf-8") as f:
+        old_cfg = json.load(f)
+except (FileNotFoundError, json.JSONDecodeError):
+    pass
+
+if old_cfg and "cron" in old_cfg:
+    cfg["cron"] = old_cfg["cron"]
+    print(f"Merged existing cron config from previous {path}")
+
 with open(path, "w", encoding="utf-8") as f:
+    cfg.setdefault("session", {})["dmScope"] = "per-channel-peer"
     json.dump(cfg, f, indent=2, ensure_ascii=False)
 
 total_models = sum(len(p["models"]) for p in providers.values())
