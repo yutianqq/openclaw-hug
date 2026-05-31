@@ -20,8 +20,13 @@ def restore():
         
         with tarfile.open(path, "r:gz") as tar:
             for member in tar.getmembers():
-                # 跳过 openclaw.json，由 start-openclaw.sh 按当前 Secrets 重新生成
                 if member.name == "openclaw.json" or member.name.endswith("/openclaw.json"):
+                    import shutil
+                    tar.extract(member, path="/root/.openclaw/")
+                    src = os.path.join("/root/.openclaw", member.name)
+                    dst = "/root/.openclaw/openclaw.json.backup"
+                    shutil.copy2(src, dst)
+                    os.remove(src)
                     continue
                 tar.extract(member, path="/root/.openclaw/")
         print(f"Success: Restored from {FILENAME} (sessions/credentials only)")

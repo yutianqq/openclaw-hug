@@ -215,9 +215,24 @@ cfg = {
     },
 }
 
+MANAGED_KEYS = {"models", "agents", "plugins", "gateway", "channels", "update", "skills"}
+
 path = "/root/.openclaw/openclaw.json"
+backup_path = "/root/.openclaw/openclaw.json.backup"
+old_cfg = {}
+if os.path.exists(backup_path):
+    try:
+        with open(backup_path, "r", encoding="utf-8") as f:
+            old_cfg = json.load(f)
+        for k, v in old_cfg.items():
+            if k not in MANAGED_KEYS and k != "session":
+                cfg[k] = v
+        print(f"Merged {len([k for k in old_cfg if k not in MANAGED_KEYS and k != 'session'])} user key(s) from backup")
+    except Exception as e:
+        print(f"WARN: failed to merge backup config: {e}")
+
+cfg.setdefault("session", {})["dmScope"] = "per-channel-peer"
 with open(path, "w", encoding="utf-8") as f:
-    cfg.setdefault("session", {})["dmScope"] = "per-channel-peer"
     json.dump(cfg, f, indent=2, ensure_ascii=False)
 
 total_models = sum(len(p["models"]) for p in providers.values())
