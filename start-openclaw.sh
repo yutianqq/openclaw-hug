@@ -109,11 +109,11 @@ for slug in provider_slugs():
         "baseUrl": base,
         "apiKey": api_key,
         "api": "openai-completions",
-        "models": [{"id": mid, "name": mid, "contextWindow": 128000, "enabled": True, "thinking": True, "fast": True} for mid in model_ids],
+        "models": [{"id": mid, "name": mid, "contextWindow": 128000, "enabled": True} for mid in model_ids],
     }
     for mid in model_ids:
         ref = f"{slug}/{mid}"
-        agent_models[ref] = {"alias": mid, "enabled": True, "thinking": True, "fast": True}
+        agent_models[ref] = {"alias": mid, "enabled": True}
         id_to_slugs.setdefault(mid, []).append(slug)
 
 def resolve_ref(item):
@@ -154,9 +154,10 @@ agents_defaults = {}
 if agent_models:
     agents_defaults["models"] = agent_models
 if primary:
-    agents_defaults["model"] = {"primary": primary, "fallbacks": fallbacks}
+    agents_defaults["model"] = {"primary": primary, "fallbacks": fallbacks, "thinking": True, "fast": True}
 
 cfg = {
+    "update": {"checkOnStart": True, "auto": {"enabled": True}},
     "models": {"mode": "merge", "providers": providers},
     "agents": {"defaults": agents_defaults},
     "commands": {"restart": True},
