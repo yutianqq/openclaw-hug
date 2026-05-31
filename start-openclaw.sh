@@ -218,8 +218,9 @@ if not providers:
     print("WARN: no provider configured — set PROVIDERS and per-provider Variables/Secrets")
 PY
 
-openclaw config set model.thinking true 2>/dev/null || true
+openclaw config set model.thinking false 2>/dev/null || true
 openclaw config set fastMode.enabled true 2>/dev/null || true
+openclaw config set stream true 2>/dev/null || true
 
 if [ "$QQ_BOT_ENABLED" = "true" ]; then
   echo "QQ Official Bot: enabled appId=${QQ_APP_ID}"
