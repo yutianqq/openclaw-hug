@@ -12,11 +12,30 @@ if ! openclaw plugins list 2>/dev/null | grep -qE '@openclaw/qqbot|"qqbot"'; the
   openclaw plugins install --dangerously-force-unsafe-install @openclaw/qqbot
 fi
 
-# 1.5 安装图片生成 Skill（SiliconFlow Kolors / FLUX / Qwen-Image）
-if ! openclaw skills list 2>/dev/null | grep -qi "gen-image"; then
-  echo "Installing gen-image skill (SiliconFlow image generation)..."
-  openclaw skills install --dangerously-force-unsafe-install duyiliu/gen-image || \
-    echo "WARN: gen-image skill install failed, image generation may not work"
+# 1.4 安装 SiliconFlow 图片生成 Plugin（原生 image_generate 支持）
+SF_PLUGIN_DIR="/root/.openclaw/plugins/openclaw-siliconflow-image"
+if [ -d "/app/plugins/openclaw-siliconflow-image" ] && [ ! -d "$SF_PLUGIN_DIR" ]; then
+  echo "Installing siliconflow-image plugin..."
+  mkdir -p "$(dirname "$SF_PLUGIN_DIR")"
+  cp -r "/app/plugins/openclaw-siliconflow-image" "$SF_PLUGIN_DIR"
+fi
+if command -v openclaw &>/dev/null && [ -d "$SF_PLUGIN_DIR" ]; then
+  if ! openclaw plugins list 2>/dev/null | grep -qi "siliconflow-image"; then
+    openclaw plugins install --dangerously-force-unsafe-install "$SF_PLUGIN_DIR" 2>/dev/null || \
+    echo "WARN: siliconflow-image plugin install from dir failed"
+  fi
+  echo "siliconflow-image plugin: installed at $SF_PLUGIN_DIR"
+else
+  echo "WARN: siliconflow-image plugin not found (expected at /app/plugins/openclaw-siliconflow-image or $SF_PLUGIN_DIR)"
+fi
+
+# 1.5 安装图片生成 Skill（SiliconFlow Kolors / FLUX / Qwen-Image）— 兜底
+echo "=== Installing gen-image skill (fallback) ==="
+npx -y clawhub@latest install gen-image 2>/dev/null || \
+openclaw skills install --dangerously-force-unsafe-install duyiliu/gen-image 2>/dev/null || \
+echo "WARN: gen-image skill install failed, trying alternative..."
+if command -v openclaw &>/dev/null; then
+  openclaw skills list 2>/dev/null | head -20 || true
 fi
 
 # 2. 恢复会话备份（不依赖备份里的 openclaw.json，下面会重新生成）
@@ -185,8 +204,11 @@ cfg = {
     "agents": {"defaults": agents_defaults},
     "commands": {"restart": True},
     "plugins": {
-        "allow": (["qqbot"] if enabled else []),
-        "entries": {"qqbot": {"enabled": enabled}},
+        "allow": ["qqbot"] + (["openclaw-siliconflow-image"] if sf_api_key else []),
+        "entries": {
+            "qqbot": {"enabled": enabled},
+            **({"openclaw-siliconflow-image": {"enabled": bool(sf_api_key)}} if sf_api_key else {}),
+        },
     },
     "skills": {
         "entries": {
