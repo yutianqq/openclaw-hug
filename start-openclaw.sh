@@ -109,7 +109,7 @@ for slug in provider_slugs():
         "baseUrl": base,
         "apiKey": api_key,
         "api": "openai-completions",
-        "models": [{"id": mid, "name": mid, "contextWindow": 128000} for mid in model_ids],
+        "models": [{"id": mid, "name": mid} for mid in model_ids],
     }
     for mid in model_ids:
         ref = f"{slug}/{mid}"
