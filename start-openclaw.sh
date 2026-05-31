@@ -95,6 +95,7 @@ fallbacks_raw = os.environ.get("MODEL_FALLBACKS", "")
 port = int(os.environ.get("PORT", "7860"))
 gw_token = os.environ.get("OPENCLAW_GATEWAY_PASSWORD", "")
 sf_api_key = os.environ.get("SILICONFLOW_API_KEY", "")
+sf_base = clean_base(os.environ.get("SILICONFLOW_OPENAI_API_BASE", "https://api.siliconflow.cn/v1"))
 
 # model_id -> [slug, ...]（用于解析未带前缀的 MODEL）
 id_to_slugs = {}
@@ -163,6 +164,21 @@ if agent_models:
     agents_defaults["models"] = agent_models
 if primary:
     agents_defaults["model"] = {"primary": primary, "fallbacks": fallbacks}
+
+if sf_api_key and "siliconflow" not in providers:
+    providers["siliconflow"] = {
+        "baseUrl": sf_base,
+        "apiKey": sf_api_key,
+        "api": "openai-completions",
+        "models": [
+            {"id": "Kwai-Kolors/Kolors", "name": "Kolors", "contextWindow": 8192},
+        ],
+    }
+    print(f"Added siliconflow provider for image generation (base={sf_base})")
+    agents_defaults["imageGenerationModel"] = {
+        "primary": "siliconflow/Kwai-Kolors/Kolors",
+        "timeoutMs": 180000,
+    }
 
 cfg = {
     "models": {"mode": "merge", "providers": providers},
