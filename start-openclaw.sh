@@ -12,6 +12,13 @@ if ! openclaw plugins list 2>/dev/null | grep -qE '@openclaw/qqbot|"qqbot"'; the
   openclaw plugins install --dangerously-force-unsafe-install @openclaw/qqbot
 fi
 
+# 1.5 安装图片生成 Skill（SiliconFlow Kolors / FLUX / Qwen-Image）
+if ! openclaw skills list 2>/dev/null | grep -qi "gen-image"; then
+  echo "Installing gen-image skill (SiliconFlow image generation)..."
+  openclaw skills install --dangerously-force-unsafe-install duyiliu/gen-image || \
+    echo "WARN: gen-image skill install failed, image generation may not work"
+fi
+
 # 2. 恢复会话备份（不依赖备份里的 openclaw.json，下面会重新生成）
 python3 /app/sync.py restore
 
@@ -87,6 +94,7 @@ model = os.environ.get("MODEL", "").strip()
 fallbacks_raw = os.environ.get("MODEL_FALLBACKS", "")
 port = int(os.environ.get("PORT", "7860"))
 gw_token = os.environ.get("OPENCLAW_GATEWAY_PASSWORD", "")
+sf_api_key = os.environ.get("SILICONFLOW_API_KEY", "")
 
 # model_id -> [slug, ...]（用于解析未带前缀的 MODEL）
 id_to_slugs = {}
@@ -164,6 +172,14 @@ cfg = {
         "allow": (["qqbot"] if enabled else []),
         "entries": {"qqbot": {"enabled": enabled}},
     },
+    "skills": {
+        "entries": {
+            "gen-image": {
+                "enabled": bool(sf_api_key),
+                "env": {"SILICONFLOW_API_KEY": sf_api_key} if sf_api_key else {}
+            }
+        }
+    } if sf_api_key else {},
     "gateway": {
         "mode": "local",
         "bind": "lan",
@@ -188,6 +204,14 @@ cfg = {
             "markdownSupport": True,
             "c2cMarkdownDeliveryMode": "proactive-all",
         }
+    },
+    "update": {
+        "channel": "stable",
+        "auto": {
+            "enabled": True,
+            "stableDelayHours": 6,
+            "stableJitterHours": 12,
+        },
     },
 }
 
