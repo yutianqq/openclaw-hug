@@ -5,6 +5,16 @@ set -e
 mkdir -p /root/.openclaw/agents/main/sessions
 mkdir -p /root/.openclaw/credentials
 mkdir -p /root/.openclaw/sessions
+mkdir -p /root/.openclaw/workspace
+
+# 1.5 初始化工作区核心文件（如果不存在）
+WORKSPACE="/root/.openclaw/workspace"
+for file in SOUL.md AGENTS.md TOOLS.md IDENTITY.md USER.md; do
+  if [ ! -f "$WORKSPACE/$file" ]; then
+    touch "$WORKSPACE/$file"
+    echo "Created missing workspace file: $file"
+  fi
+done
 
 # 1. 先确保 QQ 插件已安装（必须在写配置、启动 gateway 之前）
 if ! openclaw plugins list 2>/dev/null | grep -qE '@openclaw/qqbot|"qqbot"'; then
@@ -162,8 +172,11 @@ cfg = {
     "agents": {"defaults": agents_defaults},
     "commands": {"restart": True},
     "plugins": {
-        "allow": (["qqbot"] if enabled else []),
-        "entries": {"qqbot": {"enabled": enabled}},
+        "allow": (["qqbot", "workboard"] if enabled else ["workboard"]),
+        "entries": {
+            "qqbot": {"enabled": enabled},
+            "workboard": {"enabled": True},
+        },
     },
     "gateway": {
         "mode": "local",
