@@ -64,7 +64,7 @@ def backup():
         ]
 
         if workspace:
-            persona_files = ["SOUL.md", "AGENTS.md", "IDENTITY.md", "USER.md", "TOOLS.md"]
+            persona_files = ["SOUL.md", "AGENTS.md", "IDENTITY.md", "USER.md", "TOOLS.md", "MEMORY.md", "HEARTBEAT.md"]
             for fname in persona_files:
                 fpath = os.path.join(workspace, fname)
                 if os.path.exists(fpath):
