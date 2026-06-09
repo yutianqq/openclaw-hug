@@ -86,6 +86,7 @@ def backup():
             repo_type="dataset",
             token=token
         )
+        os.remove(FILENAME)
         print(f"Backup {FILENAME} Success (Overwritten).")
     except Exception as e:
         print(f"Backup Error: {e}")

@@ -219,7 +219,14 @@ if old_cfg and "cron" in old_cfg:
     print(f"Merged existing cron config from previous {path}")
 
 with open(path, "w", encoding="utf-8") as f:
-    cfg.setdefault("session", {})["dmScope"] = "per-channel-peer"
+    cfg.setdefault("session", {}).update({
+        "dmScope": "per-channel-peer",
+        "maintenance": {
+            "mode": "enforce",
+            "pruneAfter": "1d",
+            "maxEntries": 200,
+        },
+    })
     json.dump(cfg, f, indent=2, ensure_ascii=False)
 
 total_models = sum(len(p["models"]) for p in providers.values())
