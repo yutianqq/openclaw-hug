@@ -22,6 +22,20 @@ if ! openclaw plugins list 2>/dev/null | grep -qE '@openclaw/qqbot|"qqbot"'; the
   openclaw plugins install --dangerously-force-unsafe-install @openclaw/qqbot
 fi
 
+# 1.6 安装联网搜索 Skill
+if ! openclaw skills list 2>/dev/null | grep -q "web-search"; then
+  echo "Installing web-search skill (DuckDuckGo)..."
+  npx clawhub@latest install web-search 2>/dev/null || echo "web-search skill install skipped (will retry after gateway starts)"
+fi
+
+# 1.7 安装其他实用 Skills（跳过已安装的）
+for skill in summarize memory-wiki github weather translate qr-code document-processing image-gen; do
+  if ! openclaw skills list 2>/dev/null | grep -q "$skill"; then
+    echo "Installing skill: $skill ..."
+    npx clawhub@latest install "$skill" 2>/dev/null || echo "$skill skill install skipped"
+  fi
+done
+
 # 2. 恢复会话备份（不依赖备份里的 openclaw.json，下面会重新生成）
 python3 /app/sync.py restore
 
@@ -48,6 +62,9 @@ if [ -n "$QQ_APP_ID" ] && [ -n "$QQ_CLIENT_SECRET" ]; then
 else
   echo "QQ Official Bot: SKIPPED — set Secrets: QQBOT_APP_ID + QQBOT_CLIENT_SECRET"
 fi
+
+#    GitHub Skill（可选，需在 HF Secrets 配置 GH_TOKEN）
+echo "GitHub skill: $([ -n "$GH_TOKEN" ] && echo 'ENABLED' || echo 'SKIPPED — set Secret: GH_TOKEN')"
 
 # 4. 用 Python 写配置（从环境变量读取多 provider，避免 Secret 经 argv 传递）
 QQ_BOT_ENABLED_PY="False"

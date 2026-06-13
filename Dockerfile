@@ -5,10 +5,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git openssh-client build-essential python3 python3-pip \
     g++ make ca-certificates curl && rm -rf /var/lib/apt/lists/*
 
-RUN pip3 install --no-cache-dir huggingface_hub --break-system-packages
+RUN pip3 install --no-cache-dir huggingface_hub duckduckgo-search \
+    PyPDF2 python-docx openpyxl pdfplumber python-docx2txt \
+    --break-system-packages
 
 # 2. 安装 OpenClaw 与 QQ 官方 Bot 插件
-RUN npm install -g openclaw@2026.5.28 --unsafe-perm && \
+RUN npm install -g openclaw --unsafe-perm && \
     openclaw plugins install --dangerously-force-unsafe-install @openclaw/qqbot
 # RUN npm install -g @larksuiteoapi/node-sdk --unsafe-perm && \
     # npm install -g openclaw@2026.2.26 --unsafe-perm
