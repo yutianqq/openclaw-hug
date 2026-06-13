@@ -6,7 +6,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     g++ make ca-certificates curl && rm -rf /var/lib/apt/lists/*
 
 RUN pip3 install --no-cache-dir huggingface_hub duckduckgo-search \
-    PyPDF2 python-docx openpyxl pdfplumber python-docx2txt \
+    pypdf python-docx openpyxl pdfplumber \
     --break-system-packages
 
 # 2. 安装 OpenClaw 与 QQ 官方 Bot 插件

@@ -28,13 +28,22 @@ if ! openclaw skills list 2>/dev/null | grep -q "web-search"; then
   npx clawhub@latest install web-search 2>/dev/null || echo "web-search skill install skipped (will retry after gateway starts)"
 fi
 
-# 1.7 安装其他实用 Skills（跳过已安装的）
-for skill in summarize memory-wiki github weather translate qr-code document-processing image-gen; do
+# 1.7 安装其他实用 Skills（跳过已安装的，并行执行）
+SKILL_INSTALL_PIDS=()
+for skill in summarize memory-setup github weather translate qr-gen document-processing ai-image-gen; do
   if ! openclaw skills list 2>/dev/null | grep -q "$skill"; then
     echo "Installing skill: $skill ..."
-    npx clawhub@latest install "$skill" 2>/dev/null || echo "$skill skill install skipped"
+    (npx clawhub@latest install "$skill" 2>/dev/null || echo "$skill skill install skipped") &
+    SKILL_INSTALL_PIDS+=($!)
+  else
+    echo "Skill: $skill already installed"
   fi
 done
+# 等待所有并行 skill 安装完成
+for pid in "${SKILL_INSTALL_PIDS[@]}"; do
+  wait "$pid" 2>/dev/null || true
+done
+echo "All skills installation completed"
 
 # 2. 恢复会话备份（不依赖备份里的 openclaw.json，下面会重新生成）
 python3 /app/sync.py restore
@@ -107,6 +116,6 @@ openclaw plugins list 2>/dev/null | grep -i qq || echo "WARN: qqbot not in plugi
 
 (while true; do sleep 14400; python3 /app/sync.py backup; done) &
 
-openclaw doctor --fix --non-interactive || true
+openclaw doctor || true
 
 exec openclaw gateway run --port "$PORT" --bind lan
