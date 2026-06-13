@@ -3,7 +3,7 @@ FROM node:22-slim
 # 1. 基础依赖
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git openssh-client build-essential python3 python3-pip \
-    g++ make ca-certificates && rm -rf /var/lib/apt/lists/*
+    g++ make ca-certificates curl && rm -rf /var/lib/apt/lists/*
 
 RUN pip3 install --no-cache-dir huggingface_hub --break-system-packages
 
@@ -23,4 +23,6 @@ RUN chmod +x start-openclaw.sh
 ENV PORT=7860 HOME=/root
 
 EXPOSE 7860
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+  CMD curl -f http://localhost:$PORT/health || exit 1
 CMD ["./start-openclaw.sh"]
