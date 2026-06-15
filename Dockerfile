@@ -19,6 +19,7 @@ RUN npm install -g openclaw --unsafe-perm && \
 WORKDIR /app
 COPY sync.py .
 COPY start-openclaw.sh .
+COPY skills/ /root/.openclaw/skills/
 RUN chmod +x start-openclaw.sh
 
 # 4. 环境变量

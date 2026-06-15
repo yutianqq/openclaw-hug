@@ -3,6 +3,7 @@ import sys
 import json
 import tarfile
 import re
+import argparse
 from huggingface_hub import HfApi, hf_hub_download
 
 api = HfApi()
@@ -249,6 +250,19 @@ def generate_config():
     except (FileNotFoundError, json.JSONDecodeError):
         pass
 
+    # Preserve runtime-only providers (not from env vars) across restarts
+    env_slugs = set(provider_slugs())
+    if old_cfg and "models" in old_cfg and "providers" in old_cfg["models"]:
+        for slug, p in old_cfg["models"]["providers"].items():
+            if slug not in providers and slug not in env_slugs:
+                providers[slug] = p
+                for mid_obj in p.get("models", []):
+                    mid = mid_obj["id"]
+                    ref = f"{slug}/{mid}"
+                    agent_models[ref] = {"alias": mid}
+                    id_to_slugs.setdefault(mid, []).append(slug)
+                print(f"Preserved runtime provider: {slug}")
+
     if old_cfg and "cron" in old_cfg:
         cfg["cron"] = old_cfg["cron"]
         print(f"Merged existing cron config from previous {config_path}")
@@ -273,10 +287,161 @@ def generate_config():
         print("WARN: no provider configured — set PROVIDERS and per-provider Variables/Secrets")
 
 
+def _load_config():
+    config_path = os.path.join(OPENCLAW_DIR, "openclaw.json")
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError) as e:
+        print(f"Error reading config: {e}")
+        return None
+
+def _save_config(cfg):
+    config_path = os.path.join(OPENCLAW_DIR, "openclaw.json")
+    with open(config_path, "w", encoding="utf-8") as f:
+        json.dump(cfg, f, indent=2, ensure_ascii=False)
+
+def _mask_key(key):
+    if not key or len(key) < 12:
+        return "***"
+    return f"{key[:4]}...{key[-4:]}"
+
+def list_providers():
+    cfg = _load_config()
+    if not cfg:
+        return
+    providers = cfg.get("models", {}).get("providers", {})
+    if not providers:
+        print("No providers configured.")
+        return
+    model_cfg = cfg.get("agents", {}).get("defaults", {}).get("model", {})
+    primary = (model_cfg.get("primary") or "") if isinstance(model_cfg, dict) else ""
+    fallbacks = (model_cfg.get("fallbacks") or []) if isinstance(model_cfg, dict) else []
+    print(f"{'Slug':<16} {'Base URL':<45} {'Models':<30} {'API Key'}")
+    print("-" * 110)
+    for slug, p in providers.items():
+        marker = " [PRIMARY]" if primary.startswith(f"{slug}/") else ""
+        for fb in fallbacks:
+            if fb.startswith(f"{slug}/"):
+                marker += " [FALLBACK]"
+        models_str = ", ".join(m["id"] for m in p.get("models", []))
+        print(f"{slug:<16} {p.get('baseUrl', ''):<45} {models_str:<30} {_mask_key(p.get('apiKey', ''))}{marker}")
+    print(f"\nPrimary: {primary or '<unset>'}")
+    print(f"Fallbacks: {', '.join(fallbacks) if fallbacks else '<none>'}")
+
+def update_provider(args):
+    cfg = _load_config()
+    if not cfg:
+        return
+    if "models" not in cfg:
+        cfg["models"] = {}
+    if "providers" not in cfg["models"]:
+        cfg["models"]["providers"] = {}
+
+    providers = cfg["models"]["providers"]
+    action = args.action
+    slug = args.slug.lower()
+
+    if action == "add":
+        if slug in providers:
+            print(f"Error: Provider '{slug}' already exists. Use --action update to modify.")
+            return
+        if not args.base_url or not args.models or not args.api_key:
+            print("Error: --base-url, --models, and --api-key are required for add.")
+            return
+        models_list = [{"id": m.strip(), "name": m.strip()} for m in args.models.split(",") if m.strip()]
+        providers[slug] = {
+            "baseUrl": args.base_url,
+            "apiKey": args.api_key,
+            "api": "openai-completions",
+            "models": models_list,
+        }
+        _save_config(cfg)
+        print(f"Provider '{slug}' added: base={args.base_url}, models={[m['id'] for m in models_list]}, key={_mask_key(args.api_key)}")
+        print("Config saved. Changes take effect immediately (hot-reload).")
+
+    elif action == "remove":
+        if slug not in providers:
+            print(f"Error: Provider '{slug}' not found.")
+            return
+        model_cfg = cfg.get("agents", {}).get("defaults", {}).get("model", {})
+        primary = (model_cfg.get("primary") or "") if isinstance(model_cfg, dict) else ""
+        fallbacks = (model_cfg.get("fallbacks") or []) if isinstance(model_cfg, dict) else []
+        if primary.startswith(f"{slug}/"):
+            print(f"Error: Provider '{slug}' is the current PRIMARY model ({primary}). Change primary first.")
+            return
+        any_fb = [fb for fb in fallbacks if fb.startswith(f"{slug}/")]
+        if any_fb:
+            print(f"Error: Provider '{slug}' has fallback refs: {any_fb}. Remove from fallbacks first.")
+            return
+        del providers[slug]
+        _save_config(cfg)
+        print(f"Provider '{slug}' removed.")
+        print("Config saved. Changes take effect immediately (hot-reload).")
+
+    elif action == "update":
+        if slug not in providers:
+            print(f"Error: Provider '{slug}' not found. Use --action add to create it.")
+            return
+        p = providers[slug]
+        if args.base_url:
+            p["baseUrl"] = args.base_url
+        if args.models:
+            p["models"] = [{"id": m.strip(), "name": m.strip()} for m in args.models.split(",") if m.strip()]
+        if args.api_key:
+            p["apiKey"] = args.api_key
+        _save_config(cfg)
+        print(f"Provider '{slug}' updated:")
+        print(f"  baseUrl: {p.get('baseUrl', '<unchanged>')}")
+        print(f"  models:   {[m['id'] for m in p.get('models', [])]}")
+        print(f"  apiKey:  {_mask_key(p.get('apiKey', '<unchanged>'))}")
+        print("Config saved. Changes take effect immediately (hot-reload).")
+
+    elif action == "set-primary":
+        if slug not in providers:
+            print(f"Error: Provider '{slug}' not found.")
+            return
+        if not args.model:
+            mids = providers[slug].get("models", [])
+            if not mids:
+                print(f"Error: Provider '{slug}' has no models. Cannot set as primary.")
+                return
+            ref = f"{slug}/{mids[0]['id']}"
+            print(f"No --model specified, using first model: {ref}")
+        else:
+            ref = f"{slug}/{args.model}"
+        if "agents" not in cfg:
+            cfg["agents"] = {}
+        if "defaults" not in cfg["agents"]:
+            cfg["agents"]["defaults"] = {}
+        if "model" not in cfg["agents"]["defaults"]:
+            cfg["agents"]["defaults"]["model"] = {"primary": ref, "fallbacks": []}
+        else:
+            cfg["agents"]["defaults"]["model"]["primary"] = ref
+        _save_config(cfg)
+        print(f"Primary model set to: {ref}")
+        print("Config saved. Changes take effect immediately (hot-reload).")
+
+    else:
+        print(f"Unknown action: {action}. Use: add | remove | update | set-primary")
+
+
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "backup":
         backup()
     elif len(sys.argv) > 1 and sys.argv[1] == "generate_config":
         generate_config()
+    elif len(sys.argv) > 1 and sys.argv[1] == "update_provider":
+        parser = argparse.ArgumentParser(description="Runtime provider management")
+        parser.add_argument("--action", required=True, choices=["add", "remove", "update", "set-primary"])
+        parser.add_argument("--slug", required=True, help="Provider slug name")
+        parser.add_argument("--base-url", default="", help="API base URL")
+        parser.add_argument("--models", default="", help="Comma-separated model IDs")
+        parser.add_argument("--api-key", default="", help="API key")
+        parser.add_argument("--model", default="", help="Model ID (for set-primary)")
+        args = parser.parse_args(sys.argv[2:])
+        update_provider(args)
+    elif len(sys.argv) > 1 and sys.argv[1] == "list_providers":
+        list_providers()
     else:
         restore()
