@@ -118,4 +118,17 @@ openclaw plugins list 2>/dev/null | grep -i qq || echo "WARN: qqbot not in plugi
 
 openclaw doctor || true
 
-exec openclaw gateway run --port "$PORT" --bind lan
+# 5. 在关闭/重启前自动备份
+graceful_shutdown() {
+  echo "Shutdown signal received, running final backup..."
+  python3 /app/sync.py backup
+  echo "Final backup complete. Stopping gateway..."
+  kill "$GATEWAY_PID" 2>/dev/null
+  exit 0
+}
+trap graceful_shutdown SIGTERM SIGINT
+
+# 后台启动 Gateway，前台等待，让 trap 能捕获信号
+openclaw gateway run --port "$PORT" --bind lan &
+GATEWAY_PID=$!
+wait "$GATEWAY_PID"
